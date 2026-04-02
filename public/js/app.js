@@ -75,7 +75,7 @@ if (compressForm && compressPdfFile && compressionLevel && compressStatusMessage
       compressStatusMessage.textContent =
         "Compressed successfully. Download started.";
     } catch (error) {
-      console.error(error);
+      console.error("Compress fetch error:", error);
       compressStatusMessage.textContent =
         "Something went wrong. Please try again.";
     }
