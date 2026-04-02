@@ -4,12 +4,31 @@ const axios = require("axios");
 // Simple in-memory usage tracker
 const usageTracker = {};
 
-const PDFCO_API_BASE = "https://api.pdf.co/v1";
+const PDFCO_API_BASE_V1 = "https://api.pdf.co/v1";
+const PDFCO_API_BASE_V2 = "https://api.pdf.co/v2";
 const PDFCO_API_KEY = process.env.PDFCO_API_KEY;
+
+function getTodayKey() {
+  return new Date().toDateString();
+}
+
+function ensureDailyLimit(ip) {
+  const today = getTodayKey();
+
+  if (!usageTracker[ip]) {
+    usageTracker[ip] = { date: today, count: 0 };
+  }
+
+  if (usageTracker[ip].date !== today) {
+    usageTracker[ip] = { date: today, count: 0 };
+  }
+
+  return usageTracker[ip];
+}
 
 async function getPresignedUrl(fileName) {
   const response = await axios.get(
-    `${PDFCO_API_BASE}/file/upload/get-presigned-url`,
+    `${PDFCO_API_BASE_V1}/file/upload/get-presigned-url`,
     {
       params: {
         name: fileName,
@@ -22,7 +41,7 @@ async function getPresignedUrl(fileName) {
   );
 
   if (!response.data || response.data.error) {
-    throw new Error(response.data?.message || "Failed to get upload URL");
+    throw new Error(response.data?.message || "Failed to get upload URL.");
   }
 
   return response.data;
@@ -43,9 +62,27 @@ async function uploadFileToPdfCo(localFilePath, fileName) {
   return url;
 }
 
+function cleanupUploadedFiles(files) {
+  if (!files) return;
+
+  const fileList = Array.isArray(files) ? files : [files];
+
+  fileList.forEach((file) => {
+    try {
+      if (file?.path && fs.existsSync(file.path)) {
+        fs.unlinkSync(file.path);
+      }
+    } catch (error) {
+      console.error("Cleanup error:", error.message);
+    }
+  });
+}
+
+// =========================
+// Merge PDF
+// =========================
 exports.mergePDF = async (req, res) => {
   const ip = req.ip || req.connection.remoteAddress || "unknown";
-  const today = new Date().toDateString();
 
   try {
     if (!PDFCO_API_KEY) {
@@ -55,15 +92,9 @@ exports.mergePDF = async (req, res) => {
       });
     }
 
-    if (!usageTracker[ip]) {
-      usageTracker[ip] = { date: today, count: 0 };
-    }
+    const usage = ensureDailyLimit(ip);
 
-    if (usageTracker[ip].date !== today) {
-      usageTracker[ip] = { date: today, count: 0 };
-    }
-
-    if (usageTracker[ip].count >= 5) {
+    if (usage.count >= 5) {
       return res.status(429).json({
         success: false,
         message: "Daily limit reached (5 uses/day). Please upgrade to Pro."
@@ -85,9 +116,9 @@ exports.mergePDF = async (req, res) => {
     }
 
     const mergeResponse = await axios.post(
-      `${PDFCO_API_BASE}/pdf/merge`,
+      `${PDFCO_API_BASE_V1}/pdf/merge`,
       {
-        name: "merged.pdf",
+        name: "merged_GoPDFNow.com.au.pdf",
         url: uploadedUrls.join(","),
         async: false
       },
@@ -100,21 +131,20 @@ exports.mergePDF = async (req, res) => {
     );
 
     if (!mergeResponse.data || mergeResponse.data.error || !mergeResponse.data.url) {
-      throw new Error(mergeResponse.data?.message || "PDF merge failed");
+      throw new Error(mergeResponse.data?.message || "PDF merge failed.");
     }
 
     const fileResponse = await axios.get(mergeResponse.data.url, {
       responseType: "arraybuffer"
     });
 
-    usageTracker[ip].count += 1;
+    usage.count += 1;
+
+    const finalFileName = "merged_GoPDFNow.com.au.pdf";
 
     res.setHeader("Content-Type", "application/pdf");
-  const originalName = req.files[0].originalname.replace(".pdf", "");
-const finalFileName = `${originalName}_GoPDFNow.com.au.pdf`;
-
-res.setHeader("Content-Disposition", `attachment; filename="${finalFileName}"`);
-    res.setHeader("X-Uses-Today", `${usageTracker[ip].count}/5`);
+    res.setHeader("Content-Disposition", `attachment; filename="${finalFileName}"`);
+    res.setHeader("X-Uses-Today", `${usage.count}/5`);
 
     return res.send(Buffer.from(fileResponse.data));
   } catch (error) {
@@ -125,25 +155,30 @@ res.setHeader("Content-Disposition", `attachment; filename="${finalFileName}"`);
       message: "Something went wrong while merging PDFs."
     });
   } finally {
-    if (req.files) {
-      req.files.forEach((file) => {
-        try {
-          if (fs.existsSync(file.path)) {
-            fs.unlinkSync(file.path);
-          }
-        } catch (cleanupError) {
-          console.error("Cleanup error:", cleanupError.message);
-        }
-      });
-    }
+    cleanupUploadedFiles(req.files);
   }
 };
+
+// =========================
+// Compress PDF
+// =========================
 exports.compressPDF = async (req, res) => {
+  const ip = req.ip || req.connection.remoteAddress || "unknown";
+
   try {
     if (!PDFCO_API_KEY) {
       return res.status(500).json({
         success: false,
         message: "Missing PDFCO_API_KEY in .env"
+      });
+    }
+
+    const usage = ensureDailyLimit(ip);
+
+    if (usage.count >= 5) {
+      return res.status(429).json({
+        success: false,
+        message: "Daily limit reached (5 uses/day). Please upgrade to Pro."
       });
     }
 
@@ -156,12 +191,21 @@ exports.compressPDF = async (req, res) => {
 
     const uploadedUrl = await uploadFileToPdfCo(req.file.path, req.file.originalname);
 
+    const compressionLevel = req.body.compressionLevel || "medium";
+
+    // Optional mapping if you want to use it later
+    let profile = "screen";
+    if (compressionLevel === "low") profile = "printer";
+    if (compressionLevel === "medium") profile = "screen";
+    if (compressionLevel === "high") profile = "ebook";
+
     const compressResponse = await axios.post(
-      "https://api.pdf.co/v2/pdf/compress",
+      `${PDFCO_API_BASE_V2}/pdf/compress`,
       {
         url: uploadedUrl,
-        name: "compressed.pdf",
-        async: false
+        name: "compressed_GoPDFNow.com.au.pdf",
+        async: false,
+        profile
       },
       {
         headers: {
@@ -172,17 +216,20 @@ exports.compressPDF = async (req, res) => {
     );
 
     if (!compressResponse.data || compressResponse.data.error || !compressResponse.data.url) {
-      throw new Error(compressResponse.data?.message || "PDF compression failed");
+      throw new Error(compressResponse.data?.message || "PDF compression failed.");
     }
 
     const fileResponse = await axios.get(compressResponse.data.url, {
       responseType: "arraybuffer"
     });
 
-const finalFileName = `merged_GoPDFNow.com.au.pdf`;
+    usage.count += 1;
 
-res.setHeader("Content-Type", "application/pdf");
-res.setHeader("Content-Disposition", `attachment; filename="${finalFileName}"`);
+    const finalFileName = "compressed_GoPDFNow.com.au.pdf";
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${finalFileName}"`);
+    res.setHeader("X-Uses-Today", `${usage.count}/5`);
 
     return res.send(Buffer.from(fileResponse.data));
   } catch (error) {
@@ -193,14 +240,16 @@ res.setHeader("Content-Disposition", `attachment; filename="${finalFileName}"`);
       message: "Something went wrong while compressing the PDF."
     });
   } finally {
-    if (req.file) {
-      try {
-        if (fs.existsSync(req.file.path)) {
-          fs.unlinkSync(req.file.path);
-        }
-      } catch (cleanupError) {
-        console.error("Cleanup error:", cleanupError.message);
-      }
-    }
+    cleanupUploadedFiles(req.file);
   }
 };
+
+// =========================
+// PDF to Word placeholder
+// =========================
+// exports.pdfToWord = async (req, res) => {
+//   return res.status(501).json({
+//     success: false,
+//     message: "PDF to Word is not connected yet."
+//   });
+// };
