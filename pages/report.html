@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Report | GoPDFNow</title>
+  <link rel="stylesheet" href="/public/css/style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="/">
+        <div class="brand-icon">PDF</div>
+        <span>Go<em>PdfNow</em></span>
+      </a>
+      <nav class="nav-links">
+        <a href="/">Home</a>
+        <a href="/merge-pdf">Merge PDF</a>
+        <a href="/compress-pdf">Compress PDF</a>
+        <a href="/pdf-to-word">PDF to Word</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="section">
+    <div class="container">
+      <div class="section-head">
+        <h1>Site Report Dashboard</h1>
+        <p>Monitor page traffic, visitor activity, and time spent on each page.</p>
+      </div>
+
+      <div class="report-summary-grid">
+        <div class="report-stat-card">
+          <h3>Total Visitors</h3>
+          <p id="totalVisitors">0</p>
+        </div>
+
+        <div class="report-stat-card">
+          <h3>Active Users</h3>
+          <p id="activeUsers">0</p>
+        </div>
+
+        <div class="report-stat-card">
+          <h3>Total Tracked Pages</h3>
+          <p id="trackedPages">0</p>
+        </div>
+      </div>
+
+      <div class="content-card report-table-card">
+        <h2>Page Performance</h2>
+        <div class="table-wrap">
+          <table class="report-table">
+            <thead>
+              <tr>
+                <th>Page</th>
+                <th>Visits</th>
+                <th>Total Time (sec)</th>
+                <th>Avg Time (sec)</th>
+                <th>Last Visited</th>
+              </tr>
+            </thead>
+            <tbody id="pageReportBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="content-card report-table-card">
+        <h2>Recent Visits</h2>
+        <div class="table-wrap">
+          <table class="report-table">
+            <thead>
+              <tr>
+                <th>Page</th>
+                <th>Time on Page</th>
+                <th>Session</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="recentVisitsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    async function loadReport() {
+      try {
+        const response = await fetch("/api/analytics/report");
+        const data = await response.json();
+
+        if (!data.success) return;
+
+        document.getElementById("totalVisitors").textContent = data.totalVisitors;
+        document.getElementById("activeUsers").textContent = data.activeUsers;
+        document.getElementById("trackedPages").textContent = data.pages.length;
+
+        const pageBody = document.getElementById("pageReportBody");
+        const recentBody = document.getElementById("recentVisitsBody");
+
+        pageBody.innerHTML = "";
+        recentBody.innerHTML = "";
+
+        data.pages.forEach((page) => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${page.page}</td>
+            <td>${page.visits}</td>
+            <td>${page.totalTime}</td>
+            <td>${page.avgTime}</td>
+            <td>${page.lastVisited || "-"}</td>
+          `;
+          pageBody.appendChild(row);
+        });
+
+        data.recentVisits.forEach((visit) => {
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${visit.page}</td>
+            <td>${visit.duration}</td>
+            <td>${visit.sessionId}</td>
+            <td>${visit.timestamp}</td>
+          `;
+          recentBody.appendChild(row);
+        });
+      } catch (error) {
+        console.error("Failed to load report:", error);
+      }
+    }
+
+    loadReport();
+    setInterval(loadReport, 10000);
+  </script>
+</body>
+</html>
