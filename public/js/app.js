@@ -13,9 +13,40 @@ document.querySelectorAll('a[href^="#"]').forEach((link) => {
   });
 });
 
-// =========================
-// Compress PDF
-// =========================
+function setMessage(element, text, type = "info") {
+  if (!element) return;
+  element.textContent = text;
+  element.className = `status-message ${type}`;
+}
+
+function getFilenameFromResponse(response, fallbackName) {
+  let filename = fallbackName;
+  const contentDisposition = response.headers.get("Content-Disposition");
+
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename="(.+)"/);
+    if (match && match[1]) {
+      filename = match[1];
+    }
+  }
+
+  return filename;
+}
+
+function triggerDownload(blob, filename) {
+  const url = window.URL.createObjectURL(blob);
+  const downloadLink = document.createElement("a");
+
+  downloadLink.href = url;
+  downloadLink.download = filename;
+  document.body.appendChild(downloadLink);
+  downloadLink.click();
+  downloadLink.remove();
+
+  window.URL.revokeObjectURL(url);
+}
+
+// Compress
 const compressForm = document.getElementById("compressForm");
 const compressPdfFile = document.getElementById("compressPdfFile");
 const compressionLevel = document.getElementById("compressionLevel");
@@ -26,9 +57,10 @@ if (compressForm && compressPdfFile && compressionLevel && compressStatusMessage
     event.preventDefault();
 
     const file = compressPdfFile.files[0];
+    const submitButton = compressForm.querySelector('button[type="submit"]');
 
     if (!file) {
-      compressStatusMessage.textContent = "Please choose a PDF file.";
+      setMessage(compressStatusMessage, "Please choose a PDF file.", "error");
       return;
     }
 
@@ -36,7 +68,8 @@ if (compressForm && compressPdfFile && compressionLevel && compressStatusMessage
     formData.append("file", file);
     formData.append("compressionLevel", compressionLevel.value);
 
-    compressStatusMessage.textContent = "Compressing PDF...";
+    submitButton.disabled = true;
+    setMessage(compressStatusMessage, "Compressing PDF...", "info");
 
     try {
       const response = await fetch("/api/pdf/compress", {
@@ -46,60 +79,45 @@ if (compressForm && compressPdfFile && compressionLevel && compressStatusMessage
 
       if (!response.ok) {
         const errorData = await response.json();
-        compressStatusMessage.textContent =
-          errorData.message || "Failed to compress PDF.";
+        setMessage(
+          compressStatusMessage,
+          errorData.message || "Failed to compress PDF.",
+          "error"
+        );
         return;
       }
 
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
+      const filename = getFilenameFromResponse(
+        response,
+        "compressed_GoPDFNow.com.au.pdf"
+      );
 
-      let filename = "compressed_GoPDFNow.com.au.pdf";
-      const contentDisposition = response.headers.get("Content-Disposition");
-
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename="(.+)"/);
-        if (match && match[1]) {
-          filename = match[1];
-        }
-      }
-
-      const downloadLink = document.createElement("a");
-      downloadLink.href = url;
-      downloadLink.download = filename;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      downloadLink.remove();
-
-      window.URL.revokeObjectURL(url);
-      compressStatusMessage.textContent =
-        "Compressed successfully. Download started.";
+      triggerDownload(blob, filename);
+      setMessage(compressStatusMessage, "Compressed successfully. Download started.", "success");
     } catch (error) {
       console.error("Compress fetch error:", error);
-      compressStatusMessage.textContent =
-        "Something went wrong. Please try again.";
+      setMessage(compressStatusMessage, "Something went wrong. Please try again.", "error");
+    } finally {
+      submitButton.disabled = false;
     }
   });
 }
 
-// =========================
-// Merge PDF
-// =========================
+// Merge
 const mergeForm = document.getElementById("mergeForm");
 const pdfFiles = document.getElementById("pdfFiles");
 const statusMessage = document.getElementById("statusMessage");
 
 if (mergeForm && pdfFiles && statusMessage) {
-  console.log("Merge form detected");
-
   mergeForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    console.log("Merge submit clicked");
 
     const files = pdfFiles.files;
+    const submitButton = mergeForm.querySelector('button[type="submit"]');
 
     if (!files || files.length < 2) {
-      statusMessage.textContent = "Please select at least 2 PDF files.";
+      setMessage(statusMessage, "Please select at least 2 PDF files.", "error");
       return;
     }
 
@@ -109,7 +127,8 @@ if (mergeForm && pdfFiles && statusMessage) {
       formData.append("files", files[i]);
     }
 
-    statusMessage.textContent = "Merging PDFs...";
+    submitButton.disabled = true;
+    setMessage(statusMessage, "Merging PDFs...", "info");
 
     try {
       const response = await fetch("/api/pdf/merge", {
@@ -117,64 +136,75 @@ if (mergeForm && pdfFiles && statusMessage) {
         body: formData
       });
 
-      console.log("Merge response status:", response.status);
-
       if (!response.ok) {
         const errorData = await response.json();
-        console.log("Merge error data:", errorData);
-        statusMessage.textContent =
-          errorData.message || "Failed to merge PDF files.";
+        setMessage(statusMessage, errorData.message || "Failed to merge PDF files.", "error");
         return;
       }
 
       const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
+      const filename = getFilenameFromResponse(
+        response,
+        "merged_GoPDFNow.com.au.pdf"
+      );
 
-      let filename = "merged_GoPDFNow.com.au.pdf";
-      const contentDisposition = response.headers.get("Content-Disposition");
-
-      if (contentDisposition) {
-        const match = contentDisposition.match(/filename="(.+)"/);
-        if (match && match[1]) {
-          filename = match[1];
-        }
-      }
-
-      const downloadLink = document.createElement("a");
-      downloadLink.href = url;
-      downloadLink.download = filename;
-      document.body.appendChild(downloadLink);
-      downloadLink.click();
-      downloadLink.remove();
-
-      window.URL.revokeObjectURL(url);
-      statusMessage.textContent = "Merged successfully. Download started.";
+      triggerDownload(blob, filename);
+      setMessage(statusMessage, "Merged successfully. Download started.", "success");
     } catch (error) {
       console.error("Merge fetch error:", error);
-      statusMessage.textContent = "Something went wrong. Please try again.";
+      setMessage(statusMessage, "Something went wrong. Please try again.", "error");
+    } finally {
+      submitButton.disabled = false;
     }
   });
 }
 
-// =========================
-// PDF to Word
-// =========================
-const pdfToWordForm = document.getElementById("pdfToWordForm");
-const pdfToWordFile = document.getElementById("pdfToWordFile");
-const pdfToWordStatusMessage = document.getElementById("pdfToWordStatusMessage");
+// Waitlist
+const waitlistForm = document.getElementById("waitlistForm");
+const emailInput = document.getElementById("emailInput");
+const waitlistMessage = document.getElementById("waitlistMessage");
 
-if (pdfToWordForm && pdfToWordFile && pdfToWordStatusMessage) {
-  pdfToWordForm.addEventListener("submit", async (event) => {
+if (waitlistForm && emailInput && waitlistMessage) {
+  waitlistForm.addEventListener("submit", async (event) => {
     event.preventDefault();
 
-    const file = pdfToWordFile.files[0];
+    const email = emailInput.value.trim();
+    const submitButton = waitlistForm.querySelector('button[type="submit"]');
 
-    if (!file) {
-      pdfToWordStatusMessage.textContent = "Please choose a PDF file.";
+    if (!email) {
+      setMessage(waitlistMessage, "Please enter your email.", "error");
       return;
     }
 
-    pdfToWordStatusMessage.textContent =
-      "PDF to Word UI is ready. Backend can be connected next.";
+    submitButton.disabled = true;
+    setMessage(waitlistMessage, "Saving your request...", "info");
+
+    try {
+      const response = await fetch("/api/waitlist", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          email,
+          source: "pdf-to-word"
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setMessage(waitlistMessage, data.message || "Could not save your email.", "error");
+        return;
+      }
+
+      waitlistForm.reset();
+      setMessage(waitlistMessage, "Thank you. We will notify you when PDF to Word is live.", "success");
+    } catch (error) {
+      console.error("Waitlist error:", error);
+      setMessage(waitlistMessage, "Could not save your email. Please try again.", "error");
+    } finally {
+      submitButton.disabled = false;
+    }
   });
 }
